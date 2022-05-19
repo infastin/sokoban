@@ -9,13 +9,22 @@
 typedef struct _State State;
 
 struct _State {
+	List entry;
+	String solution;
 	u32 *positions;
 };
 
-State *state_new()
+State *state_new(usize ngoals)
 {
 	State *state = talloc(State, 1);
-	state->positions = NULL;
+	assert(state != NULL);
+
+	state->positions = calloc(ngoals + 1, 4);
+	assert(state->positions != NULL);
+
+	list_node_init(&state->entry);
+	string_init0(&state->solution);
+
 	return state;
 }
 
@@ -24,7 +33,6 @@ typedef struct _Game Game;
 struct _Game {
 	u32 width;
 	u32 height;
-	u32 nboxes;
 	u32 ngoals;
 
 	u32 *goals_pos;
@@ -33,7 +41,7 @@ struct _Game {
 
 	u32 **distances;
 
-	State *state;
+	List states;
 };
 
 Game *game_init(Game *game)
@@ -45,13 +53,13 @@ Game *game_init(Game *game)
 
 	game->width = 0;
 	game->height = 0;
-	game->nboxes = 0;
 	game->ngoals = 0;
 	game->board = NULL;
 	game->marks = NULL;
 	game->goals_pos = NULL;
 	game->distances = NULL;
-	game->state = state_new();
+
+	list_init(&game->states);
 
 	return game;
 }
@@ -68,14 +76,40 @@ void mark(Game *game, u32 pos)
 
 	game->marks[pos] = 1;
 
-	if (y > 1 && game->board[pos - w] != WALL && game->board[pos - (w << 1)] != WALL)
-		mark(game, pos - w);
-	if (y < h - 2 && game->board[pos + w] != WALL && game->board[pos + (w << 1)] != WALL)
-		mark(game, pos + w);
-	if (x > 1 && game->board[pos - 1] != WALL && game->board[pos - 1] != WALL)
+	if (x > 2 && game->board[pos - 1] != WALL && game->board[pos - 2] != WALL)
 		mark(game, pos - 1);
 	if (x < w - 2 && game->board[pos + 1] != WALL && game->board[pos + 2] != WALL)
 		mark(game, pos + 1);
+	if (y > 2 && game->board[pos - w] != WALL && game->board[pos - (w << 1)] != WALL)
+		mark(game, pos - w);
+	if (y < h - 2 && game->board[pos + w] != WALL && game->board[pos + (w << 1)] != WALL)
+		mark(game, pos + w);
+}
+
+u32 get_box(Game *game, State *state, u32 pos)
+{
+	for (u32 i = 1; i <= game->ngoals; ++i) {
+		if (state->positions[i] == pos)
+			return i;
+	}
+
+	return -1;
+}
+
+bool is_solved(Game *game, State *state)
+{
+	for (u32 i = 0; i < game->ngoals; ++i) {
+		if (get_box(game, state, game->goals_pos[i]) == -1)
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
+char *solve(Game *game)
+{
+	static u8 move_chars[4] = { 'l', 'u', 'r', 'd' };
+	static u8 push_chars[4] = { 'L', 'U', 'R', 'D' };
 }
 
 void parse_board(Game *game, u32 width, u32 height, const char *str)
@@ -89,6 +123,9 @@ void parse_board(Game *game, u32 width, u32 height, const char *str)
 	game->marks = calloc(width * height, 1);
 	assert(game->marks);
 
+	State *init_state = state_new(game->ngoals);
+	list_push_back(&game->states, &init_state->entry);
+
 	for (u32 i = 0; str[i]; ++i) {
 		switch (str[i]) {
 		case WALL:
@@ -96,14 +133,12 @@ void parse_board(Game *game, u32 width, u32 height, const char *str)
 			continue;
 
 		case BOX:
-			game->nboxes++;
 		case PLAYER:
 		case FLOOR:
 			game->board[i] = FLOOR;
 			continue;
 
 		case BOX_ON_GOAL:
-			game->nboxes++;
 		case GOAL:
 		case PLAYER_ON_GOAL:
 			game->ngoals++;
@@ -116,11 +151,12 @@ void parse_board(Game *game, u32 width, u32 height, const char *str)
 	}
 
 	game->goals_pos = calloc(game->ngoals, 4);
-	game->state->positions = calloc(game->nboxes + 1, 4);
 
 	for (u32 i = 0, j = 0, k = 0; i < width * height; ++i) {
 		if (game->board[i] == GOAL)
 			mark(game, i);
+
+		State *cur = list_entry(game->states.prev, State, entry);
 
 		switch (str[i]) {
 		case GOAL:
@@ -130,22 +166,19 @@ void parse_board(Game *game, u32 width, u32 height, const char *str)
 		case PLAYER_ON_GOAL:
 			game->goals_pos[k++] = i;
 		case PLAYER:
-			game->state->positions[0] = i;
+			cur->positions[0] = i;
 			continue;
 
 		case BOX_ON_GOAL:
 			game->goals_pos[k++] = i;
 		case BOX:
-			game->state->positions[++j] = i;
+			cur->positions[++j] = i;
 			continue;
 
 		default:
 			continue;
 		}
 	}
-
-	calc_distances(game);
-	assign_goals_and_boxes(game);
 }
 
 void show_board(const Game *game)
@@ -153,16 +186,18 @@ void show_board(const Game *game)
 	u8 board[game->width * game->height];
 	memcpy(board, game->board, game->width * game->height);
 
-	if (board[game->state->positions[0]] == GOAL)
-		board[game->state->positions[0]] = PLAYER_ON_GOAL;
-	else
-		board[game->state->positions[0]] = PLAYER;
+	State *cur = list_entry(game->states.prev, State, entry);
 
-	for (u32 i = 1; i < game->nboxes + 1; ++i) {
-		if (board[game->state->positions[i]] == GOAL)
-			board[game->state->positions[i]] = BOX_ON_GOAL;
+	if (board[cur->positions[0]] == GOAL)
+		board[cur->positions[0]] = PLAYER_ON_GOAL;
+	else
+		board[cur->positions[0]] = PLAYER;
+
+	for (u32 i = 1; i < game->ngoals + 1; ++i) {
+		if (board[cur->positions[i]] == GOAL)
+			board[cur->positions[i]] = BOX_ON_GOAL;
 		else
-			board[game->state->positions[i]] = BOX;
+			board[cur->positions[i]] = BOX;
 	}
 
 	for (u32 i = 0; i < game->width * game->height; ++i) {
@@ -188,11 +223,22 @@ int main(int argc, char *argv[])
 					"#.#  @#"
 					"#######";
 
+	const char *p = "  ###   "
+					"  #.#   "
+					"  # ####"
+					"###$ $.#"
+					"#. $@###"
+					"####$#  "
+					"   #.#  "
+					"   ###  ";
+
 	Game game;
 	game_init(&game);
 	parse_board(&game, 7, 8, s);
 
 	show_board(&game);
+
+	printf("%s\n", solve(&game));
 
 	return 0;
 }

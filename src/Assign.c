@@ -302,8 +302,7 @@ Edge *hungarian_assignment(u32 **distances, u32 ngoals)
 		}
 	}
 
-	Edge *result;
-	vector_steal0(&matching, &result, NULL, FALSE);
+	Edge *result = vector_steal0(&matching, NULL);
 
 	free(table);
 	free(marks);
@@ -352,16 +351,15 @@ Edge *closest_assignment(u32 **distances, u32 ngoals)
 	vector_destroy(&unmatched_boxes, NULL);
 	vector_destroy(&unmatched_goals, NULL);
 
-	Edge *result;
-	vector_steal0(&matching, &result, NULL, FALSE);
+	Edge *result = vector_steal0(&matching, NULL);
 
 	return result;
 }
 
 Edge *greedy_assignment(u32 **distances, u32 ngoals)
 {
-	Heap queue;
-	heap_init(&queue, sizeof(Edge), (CmpFunc) cmp_edges);
+	Heap pqueue;
+	heap_init(&pqueue, sizeof(Edge), (CmpFunc) cmp_edges);
 
 	for (u32 goal = 0; goal < ngoals; ++goal) {
 		for (u32 box = 0; box < ngoals; ++box) {
@@ -371,7 +369,7 @@ Edge *greedy_assignment(u32 **distances, u32 ngoals)
 				.distance = distances[goal][box],
 			};
 
-			heap_insert(&queue, &edge);
+			heap_insert(&pqueue, &edge);
 		}
 	}
 
@@ -390,9 +388,9 @@ Edge *greedy_assignment(u32 **distances, u32 ngoals)
 		vector_push_back(&unmatched_goals, get_ptr(u32, goal));
 	}
 
-	while (queue.vector.len != 0) {
+	while (pqueue.vector.len != 0) {
 		Edge edge;
-		heap_pop_back(&queue, &edge);
+		heap_pop_back(&pqueue, &edge);
 
 		usize umb_index = 0;
 		usize umg_index = 0;
@@ -430,10 +428,9 @@ Edge *greedy_assignment(u32 **distances, u32 ngoals)
 
 	vector_destroy(&unmatched_boxes, NULL);
 	vector_destroy(&unmatched_goals, NULL);
-	heap_destroy(&queue, NULL);
+	heap_destroy(&pqueue, NULL);
 
-	Edge *result;
-	vector_steal0(&matching, &result, NULL, FALSE);
+	Edge *result = vector_steal0(&matching, NULL);
 
 	return result;
 }

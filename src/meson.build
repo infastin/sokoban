@@ -7,12 +7,8 @@ source_files = [
 
 math_dep = cxx.find_library('m')
 libtribble_dep = dependency('tribble')
-# executable('sokoban', 'sokoban.c',
-#   sources: source_files,
-#   dependencies: libtribble_dep
-# )
 
-executable('main', 'main.c',
+executable('sokoban', 'sokoban.c',
   sources: source_files,
-  dependencies: [libtribble_dep, math_dep],
+  dependencies: [libtribble_dep, math_dep]
 )
