@@ -4,7 +4,7 @@
 #include <tribble/List.h>
 #include <tribble/Messages.h>
 
-typedef List Queue;
+typedef TrbList Queue;
 typedef struct _QueueNode QueueNode;
 
 struct _QueueNode {

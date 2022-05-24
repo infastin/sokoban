@@ -216,7 +216,7 @@ static void __hungarian_add_and_subtract(
 }
 
 /* Used for debugging */
-UNUSED static void __hungarian_print_table(
+TRB_UNUSED static void __hungarian_print_table(
 	u32 **table,
 	u8 **marks,
 	u32 ngoals,
@@ -291,18 +291,18 @@ Edge *hungarian_assignment(u32 **distances, u32 ngoals)
 		memset(covered_cols, 0, ngoals);
 	}
 
-	Vector matching;
-	vector_init(&matching, TRUE, FALSE, sizeof(Edge));
+	TrbVector matching;
+	trb_vector_init(&matching, TRUE, FALSE, sizeof(Edge));
 
 	for (u32 i = 0; i < ngoals; ++i) {
 		for (u32 j = 0; j < ngoals; ++j) {
 			if (marks[i][j] == MARK) {
-				vector_push_back(&matching, get_ptr(Edge, i, j, distances[i][j]));
+				trb_vector_push_back(&matching, trb_get_ptr(Edge, i, j, distances[i][j]));
 			}
 		}
 	}
 
-	Edge *result = vector_steal0(&matching, NULL);
+	Edge *result = trb_vector_steal0(&matching, NULL);
 
 	free(table);
 	free(marks);
@@ -312,29 +312,29 @@ Edge *hungarian_assignment(u32 **distances, u32 ngoals)
 
 Edge *closest_assignment(u32 **distances, u32 ngoals)
 {
-	Vector matching;
-	vector_init(&matching, TRUE, FALSE, sizeof(Edge));
+	TrbVector matching;
+	trb_vector_init(&matching, TRUE, FALSE, sizeof(Edge));
 
-	Vector unmatched_boxes;
-	vector_init(&unmatched_boxes, TRUE, FALSE, 4);
+	TrbVector unmatched_boxes;
+	trb_vector_init(&unmatched_boxes, TRUE, FALSE, 4);
 	for (u32 box = 0; box < ngoals; ++box) {
-		vector_push_back(&unmatched_boxes, get_ptr(u32, box));
+		trb_vector_push_back(&unmatched_boxes, trb_get_ptr(u32, box));
 	}
 
-	Vector unmatched_goals;
-	vector_init(&unmatched_goals, TRUE, FALSE, 4);
+	TrbVector unmatched_goals;
+	trb_vector_init(&unmatched_goals, TRUE, FALSE, 4);
 	for (u32 goal = 0; goal < ngoals; ++goal) {
-		vector_push_back(&unmatched_goals, get_ptr(u32, goal));
+		trb_vector_push_back(&unmatched_goals, trb_get_ptr(u32, goal));
 	}
 
 	for (u32 i = 0; i < unmatched_goals.len; ++i) {
-		u32 goal = vector_get_unsafe(&unmatched_goals, u32, i);
+		u32 goal = trb_vector_get_unsafe(&unmatched_goals, u32, i);
 		u32 closest_j = 0;
-		u32 closest_box = vector_get_unsafe(&unmatched_boxes, u32, 0);
+		u32 closest_box = trb_vector_get_unsafe(&unmatched_boxes, u32, 0);
 		u32 closest_dist = distances[goal][closest_box];
 
 		for (u32 j = 1; j < unmatched_boxes.len; ++j) {
-			u32 box = vector_get_unsafe(&unmatched_boxes, u32, j);
+			u32 box = trb_vector_get_unsafe(&unmatched_boxes, u32, j);
 			u32 dist = distances[goal][box];
 
 			if (dist > closest_dist) {
@@ -344,22 +344,22 @@ Edge *closest_assignment(u32 **distances, u32 ngoals)
 			}
 		}
 
-		vector_remove_index(&unmatched_boxes, closest_j, NULL);
-		vector_push_back(&matching, get_ptr(Edge, goal, closest_box, closest_dist));
+		trb_vector_remove_index(&unmatched_boxes, closest_j, NULL);
+		trb_vector_push_back(&matching, trb_get_ptr(Edge, goal, closest_box, closest_dist));
 	}
 
-	vector_destroy(&unmatched_boxes, NULL);
-	vector_destroy(&unmatched_goals, NULL);
+	trb_vector_destroy(&unmatched_boxes, NULL);
+	trb_vector_destroy(&unmatched_goals, NULL);
 
-	Edge *result = vector_steal0(&matching, NULL);
+	Edge *result = trb_vector_steal0(&matching, NULL);
 
 	return result;
 }
 
 Edge *greedy_assignment(u32 **distances, u32 ngoals)
 {
-	Heap pqueue;
-	heap_init(&pqueue, sizeof(Edge), (CmpFunc) cmp_edges);
+	TrbHeap pqueue;
+	trb_heap_init(&pqueue, sizeof(Edge), (TrbCmpFunc) cmp_edges);
 
 	for (u32 goal = 0; goal < ngoals; ++goal) {
 		for (u32 box = 0; box < ngoals; ++box) {
@@ -369,50 +369,50 @@ Edge *greedy_assignment(u32 **distances, u32 ngoals)
 				.distance = distances[goal][box],
 			};
 
-			heap_insert(&pqueue, &edge);
+			trb_heap_insert(&pqueue, &edge);
 		}
 	}
 
-	Vector matching;
-	vector_init(&matching, TRUE, FALSE, sizeof(Edge));
+	TrbVector matching;
+	trb_vector_init(&matching, TRUE, FALSE, sizeof(Edge));
 
-	Vector unmatched_boxes;
-	vector_init(&unmatched_boxes, TRUE, FALSE, 4);
+	TrbVector unmatched_boxes;
+	trb_vector_init(&unmatched_boxes, TRUE, FALSE, 4);
 	for (u32 box = 0; box < ngoals; ++box) {
-		vector_push_back(&unmatched_boxes, get_ptr(u32, box));
+		trb_vector_push_back(&unmatched_boxes, trb_get_ptr(u32, box));
 	}
 
-	Vector unmatched_goals;
-	vector_init(&unmatched_goals, TRUE, FALSE, 4);
+	TrbVector unmatched_goals;
+	trb_vector_init(&unmatched_goals, TRUE, FALSE, 4);
 	for (u32 goal = 0; goal < ngoals; ++goal) {
-		vector_push_back(&unmatched_goals, get_ptr(u32, goal));
+		trb_vector_push_back(&unmatched_goals, trb_get_ptr(u32, goal));
 	}
 
 	while (pqueue.vector.len != 0) {
 		Edge edge;
-		heap_pop_back(&pqueue, &edge);
+		trb_heap_pop_back(&pqueue, &edge);
 
 		usize umb_index = 0;
 		usize umg_index = 0;
 
-		bool umb_contains = vector_search(&unmatched_boxes, &edge.box, (CmpFunc) u32cmp, &umb_index);
-		bool umg_contains = vector_search(&unmatched_goals, &edge.goal, (CmpFunc) u32cmp, &umg_index);
+		bool umb_contains = trb_vector_search(&unmatched_boxes, &edge.box, (TrbCmpFunc) trb_u32cmp, &umb_index);
+		bool umg_contains = trb_vector_search(&unmatched_goals, &edge.goal, (TrbCmpFunc) trb_u32cmp, &umg_index);
 
 		if (umb_contains && umg_contains) {
-			vector_push_back(&matching, &edge);
-			vector_remove_index(&unmatched_boxes, umb_index, NULL);
-			vector_remove_index(&unmatched_goals, umg_index, NULL);
+			trb_vector_push_back(&matching, &edge);
+			trb_vector_remove_index(&unmatched_boxes, umb_index, NULL);
+			trb_vector_remove_index(&unmatched_goals, umg_index, NULL);
 		}
 	}
 
 	for (u32 i = 0; i < unmatched_goals.len; ++i) {
-		u32 goal = vector_get_unsafe(&unmatched_goals, u32, i);
+		u32 goal = trb_vector_get_unsafe(&unmatched_goals, u32, i);
 		u32 closest_j = 0;
-		u32 closest_box = vector_get_unsafe(&unmatched_boxes, u32, 0);
+		u32 closest_box = trb_vector_get_unsafe(&unmatched_boxes, u32, 0);
 		u32 closest_dist = distances[goal][closest_box];
 
 		for (u32 j = 1; j < unmatched_boxes.len; ++j) {
-			u32 box = vector_get_unsafe(&unmatched_boxes, u32, j);
+			u32 box = trb_vector_get_unsafe(&unmatched_boxes, u32, j);
 			u32 dist = distances[goal][box];
 
 			if (dist > closest_dist) {
@@ -422,15 +422,15 @@ Edge *greedy_assignment(u32 **distances, u32 ngoals)
 			}
 		}
 
-		vector_remove_index(&unmatched_boxes, closest_j, NULL);
-		vector_push_back(&matching, get_ptr(Edge, goal, closest_box, closest_dist));
+		trb_vector_remove_index(&unmatched_boxes, closest_j, NULL);
+		trb_vector_push_back(&matching, trb_get_ptr(Edge, goal, closest_box, closest_dist));
 	}
 
-	vector_destroy(&unmatched_boxes, NULL);
-	vector_destroy(&unmatched_goals, NULL);
-	heap_destroy(&pqueue, NULL);
+	trb_vector_destroy(&unmatched_boxes, NULL);
+	trb_vector_destroy(&unmatched_goals, NULL);
+	trb_heap_destroy(&pqueue, NULL);
 
-	Edge *result = vector_steal0(&matching, NULL);
+	Edge *result = trb_vector_steal0(&matching, NULL);
 
 	return result;
 }
