@@ -2,6 +2,7 @@
 
 #include "Definitions.h"
 
+#include <assert.h>
 #include <memory.h>
 #include <tribble/Tribble.h>
 
@@ -11,45 +12,44 @@ enum {
 	PRIME
 };
 
-static void __hungarian_reduce_rows(u32 **table, u32 ngoals)
+static void __hungarian_reduce_rows(u32 ngoals, u32 (*table)[ngoals][ngoals])
 {
 	for (u32 i = 0; i < ngoals; ++i) {
-		u32 lowest = table[i][0];
+		u32 lowest = (*table)[i][0];
 
 		for (u32 j = 1; j < ngoals; ++j) {
-			if (table[i][j] < lowest)
-				lowest = table[i][j];
+			if ((*table)[i][j] < lowest)
+				lowest = (*table)[i][j];
 		}
 
 		for (u32 j = 0; j < ngoals; ++j) {
-			table[i][j] -= lowest;
+			(*table)[i][j] -= lowest;
 		}
 	}
 }
 
-static void __hungarian_reduce_cols(u32 **table, u32 ngoals)
+static void __hungarian_reduce_cols(u32 ngoals, u32 (*table)[ngoals][ngoals])
 {
 	for (u32 j = 0; j < ngoals; ++j) {
-		u32 lowest = table[0][j];
+		u32 lowest = (*table)[0][j];
 
 		for (u32 i = 1; i < ngoals; ++i) {
-			if (table[i][j] < lowest)
-				lowest = table[i][j];
+			if ((*table)[i][j] < lowest)
+				lowest = (*table)[i][j];
 		}
 
 		if (lowest == 0)
 			continue;
 
 		for (u32 i = 0; i < ngoals; ++i) {
-			table[i][j] -= lowest;
+			(*table)[i][j] -= lowest;
 		}
 	}
 }
 
-static u8 **__hungarian_mark(u32 **table, u32 ngoals)
+static void __hungarian_mark(u32 ngoals, u32 (*table)[ngoals][ngoals], u8 (*marks)[ngoals][ngoals])
 {
-	u8 **marks = (u8 **) alloc_2d(1, ngoals, ngoals);
-	memset_2d((void **) marks, 1, 0, ngoals, ngoals);
+	memset(marks, 0, sizeof *marks);
 
 	u8 covered_rows[ngoals];
 	memset(covered_rows, 0, ngoals);
@@ -62,24 +62,27 @@ static u8 **__hungarian_mark(u32 **table, u32 ngoals)
 			if (covered_rows[i] || covered_cols[j])
 				break;
 
-			if (table[i][j] == 0) {
-				marks[i][j] = MARK;
+			if ((*table)[i][j] == 0) {
+				(*marks)[i][j] = MARK;
 				covered_rows[i] = 1;
 				covered_cols[j] = 1;
 			}
 		}
 	}
-
-	return marks;
 }
 
-static u32 __hungarian_count_covered(u8 **marks, u32 ngoals, u8 covered_rows[ngoals], u8 covered_cols[ngoals])
+static u32 __hungarian_count_covered(
+	u32 ngoals,
+	u8 (*marks)[ngoals][ngoals],
+	u8 covered_rows[ngoals],
+	u8 covered_cols[ngoals]
+)
 {
 	u32 count = 0;
 
 	for (u32 i = 0; i < ngoals; ++i) {
 		for (u32 j = 0; j < ngoals; ++j) {
-			if ((covered_rows[i] || covered_cols[j]) && (marks[i][j] == MARK))
+			if ((covered_rows[i] || covered_cols[j]) && ((*marks)[i][j] == MARK))
 				count++;
 		}
 	}
@@ -87,11 +90,11 @@ static u32 __hungarian_count_covered(u8 **marks, u32 ngoals, u8 covered_rows[ngo
 	return count;
 }
 
-static void __hungarian_cover_cols(u8 **marks, u32 ngoals, u8 covered_cols[ngoals])
+static void __hungarian_cover_cols(u32 ngoals, u8 (*marks)[ngoals][ngoals], u8 covered_cols[ngoals])
 {
 	for (u32 i = 0; i < ngoals; ++i) {
 		for (u32 j = 0; j < ngoals; ++j) {
-			if (marks[i][j] == MARK) {
+			if ((*marks)[i][j] == MARK) {
 				covered_cols[j] = 1;
 			}
 		}
@@ -99,9 +102,9 @@ static void __hungarian_cover_cols(u8 **marks, u32 ngoals, u8 covered_cols[ngoal
 }
 
 static bool __hungarian_find_prime(
-	u32 **table,
-	u8 **marks,
 	u32 ngoals,
+	u32 (*table)[ngoals][ngoals],
+	u8 (*marks)[ngoals][ngoals],
 	u8 covered_rows[ngoals],
 	u8 covered_cols[ngoals],
 	u32 *prime_row,
@@ -112,7 +115,7 @@ static bool __hungarian_find_prime(
 		u32 mark_col = U32_MAX;
 
 		for (u32 j = 0; j < ngoals; ++j) {
-			if (marks[i][j] == MARK) {
+			if ((*marks)[i][j] == MARK) {
 				mark_col = j;
 				continue;
 			}
@@ -120,10 +123,10 @@ static bool __hungarian_find_prime(
 			if (covered_cols[j])
 				continue;
 
-			if (table[i][j] != 0)
+			if ((*table)[i][j] != 0)
 				continue;
 
-			marks[i][j] = PRIME;
+			(*marks)[i][j] = PRIME;
 
 			if (mark_col != U32_MAX) {
 				covered_rows[i] = 1;
@@ -142,8 +145,8 @@ static bool __hungarian_find_prime(
 }
 
 static void __hungarian_alt_marks(
-	u8 **marks,
 	u32 ngoals,
+	u8 (*marks)[ngoals][ngoals],
 	u32 prime_row,
 	u32 prime_col
 )
@@ -156,24 +159,24 @@ static void __hungarian_alt_marks(
 			if (i == prime_row)
 				continue;
 
-			if (marks[i][prime_col] == MARK) {
+			if ((*marks)[i][prime_col] == MARK) {
 				mark_row = i;
 				break;
 			}
 		}
 
-		marks[prime_row][prime_col] = MARK;
+		(*marks)[prime_row][prime_col] = MARK;
 
 		if (mark_row == U32_MAX)
 			break;
 
-		marks[mark_row][mark_col] = NONE;
+		(*marks)[mark_row][mark_col] = NONE;
 
 		for (u32 j = 0; j < ngoals; ++j) {
 			if (j == prime_col)
 				continue;
 
-			if (marks[mark_row][j] == PRIME) {
+			if ((*marks)[mark_row][j] == PRIME) {
 				prime_row = mark_row;
 				prime_col = j;
 				break;
@@ -183,8 +186,8 @@ static void __hungarian_alt_marks(
 }
 
 static void __hungarian_add_and_subtract(
-	u32 **table,
 	u32 ngoals,
+	u32 (*table)[ngoals][ngoals],
 	u8 covered_rows[ngoals],
 	u8 covered_cols[ngoals]
 )
@@ -199,8 +202,8 @@ static void __hungarian_add_and_subtract(
 			if (covered_cols[j])
 				continue;
 
-			if (table[i][j] < lowest) {
-				lowest = table[i][j];
+			if ((*table)[i][j] < lowest) {
+				lowest = (*table)[i][j];
 			}
 		}
 	}
@@ -208,18 +211,18 @@ static void __hungarian_add_and_subtract(
 	for (u32 i = 0; i < ngoals; ++i) {
 		for (u32 j = 0; j < ngoals; ++j) {
 			if (!covered_rows[i] && !covered_cols[j])
-				table[i][j] -= lowest;
+				(*table)[i][j] -= lowest;
 			else if (covered_rows[i] && covered_cols[j])
-				table[i][j] += lowest;
+				(*table)[i][j] += lowest;
 		}
 	}
 }
 
 /* Used for debugging */
 TRB_UNUSED static void __hungarian_print_table(
-	u32 **table,
-	u8 **marks,
 	u32 ngoals,
+	u32 (*table)[ngoals][ngoals],
+	u8 (*marks)[ngoals][ngoals],
 	u8 covered_rows[ngoals],
 	u8 covered_cols[ngoals]
 )
@@ -230,13 +233,13 @@ TRB_UNUSED static void __hungarian_print_table(
 				printf("\e[30;47m");
 			}
 
-			if (marks != NULL && marks[i][j]) {
-				if (marks[i][j] == MARK)
-					printf("%4d*", table[i][j]);
-				else if (marks[i][j] == PRIME)
-					printf("%4d'", table[i][j]);
+			if (marks != NULL && (*marks)[i][j]) {
+				if ((*marks)[i][j] == MARK)
+					printf("%4d*", (*table)[i][j]);
+				else if ((*marks)[i][j] == PRIME)
+					printf("%4d'", (*table)[i][j]);
 			} else {
-				printf("%4d ", table[i][j]);
+				printf("%4d ", (*table)[i][j]);
 			}
 
 			if (covered_rows[i] || covered_cols[j]) {
@@ -248,7 +251,7 @@ TRB_UNUSED static void __hungarian_print_table(
 	}
 }
 
-Edge *hungarian_assignment(u32 **distances, u32 ngoals)
+u32 *hungarian_assignment(u32 ngoals, u32 (*distances)[ngoals][ngoals])
 {
 	u8 covered_rows[ngoals];
 	memset(covered_rows, 0, ngoals);
@@ -256,17 +259,23 @@ Edge *hungarian_assignment(u32 **distances, u32 ngoals)
 	u8 covered_cols[ngoals];
 	memset(covered_cols, 0, ngoals);
 
-	u32 **table = (u32 **) copy_2d(NULL, (const void **) distances, 4, ngoals, ngoals);
+	u32(*table)[ngoals][ngoals] = malloc(sizeof *table);
+	assert(table != NULL);
 
-	__hungarian_reduce_rows(table, ngoals);
-	__hungarian_reduce_cols(table, ngoals);
+	memcpy(table, distances, sizeof *table);
 
-	u8 **marks = __hungarian_mark(table, ngoals);
+	__hungarian_reduce_rows(ngoals, table);
+	__hungarian_reduce_cols(ngoals, table);
+
+	u8(*marks)[ngoals][ngoals] = malloc(sizeof *marks);
+	assert(marks != NULL);
+
+	__hungarian_mark(ngoals, table, marks);
 
 	while (1) {
-		__hungarian_cover_cols(marks, ngoals, covered_cols);
+		__hungarian_cover_cols(ngoals, marks, covered_cols);
 
-		u32 n_covered = __hungarian_count_covered(marks, ngoals, covered_rows, covered_cols);
+		u32 n_covered = __hungarian_count_covered(ngoals, marks, covered_rows, covered_cols);
 		if (n_covered == ngoals)
 			break;
 
@@ -274,7 +283,7 @@ Edge *hungarian_assignment(u32 **distances, u32 ngoals)
 
 		while (1) {
 			bool found_prime = __hungarian_find_prime(
-				table, marks, ngoals,
+				ngoals, table, marks,
 				covered_rows, covered_cols,
 				&prime_row, &prime_col
 			);
@@ -282,60 +291,55 @@ Edge *hungarian_assignment(u32 **distances, u32 ngoals)
 			if (found_prime)
 				break;
 
-			__hungarian_add_and_subtract(table, ngoals, covered_rows, covered_cols);
+			__hungarian_add_and_subtract(ngoals, table, covered_rows, covered_cols);
 		}
 
-		__hungarian_alt_marks(marks, ngoals, prime_row, prime_col);
+		__hungarian_alt_marks(ngoals, marks, prime_row, prime_col);
 
 		memset(covered_rows, 0, ngoals);
 		memset(covered_cols, 0, ngoals);
 	}
 
-	TrbVector matching;
-	trb_vector_init(&matching, TRUE, FALSE, sizeof(Edge));
+	u32 *matching = malloc(ngoals * sizeof(u32));
+	assert(matching != NULL);
 
-	for (u32 i = 0; i < ngoals; ++i) {
-		for (u32 j = 0; j < ngoals; ++j) {
-			if (marks[i][j] == MARK) {
-				trb_vector_push_back(&matching, trb_get_ptr(Edge, i, j, distances[i][j]));
-			}
-		}
-	}
-
-	Edge *result = trb_vector_steal0(&matching, NULL);
+	for (u32 i = 0; i < ngoals; ++i)
+		for (u32 j = 0; j < ngoals; ++j)
+			if ((*marks)[i][j] == MARK)
+				matching[i] = j;
 
 	free(table);
 	free(marks);
 
-	return result;
+	return matching;
 }
 
-Edge *closest_assignment(u32 **distances, u32 ngoals)
+u32 *closest_assignment(u32 ngoals, u32 (*distances)[ngoals][ngoals])
 {
-	TrbVector matching;
-	trb_vector_init(&matching, TRUE, FALSE, sizeof(Edge));
+	u32 *matching = malloc(ngoals * sizeof(u32));
+	assert(matching != NULL);
 
 	TrbVector unmatched_boxes;
-	trb_vector_init(&unmatched_boxes, TRUE, FALSE, 4);
+	trb_vector_init(&unmatched_boxes, TRUE, 4);
 	for (u32 box = 0; box < ngoals; ++box) {
 		trb_vector_push_back(&unmatched_boxes, trb_get_ptr(u32, box));
 	}
 
 	TrbVector unmatched_goals;
-	trb_vector_init(&unmatched_goals, TRUE, FALSE, 4);
+	trb_vector_init(&unmatched_goals, TRUE, 4);
 	for (u32 goal = 0; goal < ngoals; ++goal) {
 		trb_vector_push_back(&unmatched_goals, trb_get_ptr(u32, goal));
 	}
 
 	for (u32 i = 0; i < unmatched_goals.len; ++i) {
-		u32 goal = trb_vector_get_unsafe(&unmatched_goals, u32, i);
+		u32 goal = trb_vector_get(&unmatched_goals, u32, i);
 		u32 closest_j = 0;
-		u32 closest_box = trb_vector_get_unsafe(&unmatched_boxes, u32, 0);
-		u32 closest_dist = distances[goal][closest_box];
+		u32 closest_box = trb_vector_get(&unmatched_boxes, u32, 0);
+		u32 closest_dist = (*distances)[goal][closest_box];
 
 		for (u32 j = 1; j < unmatched_boxes.len; ++j) {
-			u32 box = trb_vector_get_unsafe(&unmatched_boxes, u32, j);
-			u32 dist = distances[goal][box];
+			u32 box = trb_vector_get(&unmatched_boxes, u32, j);
+			u32 dist = (*distances)[goal][box];
 
 			if (dist > closest_dist) {
 				closest_j = j;
@@ -344,19 +348,17 @@ Edge *closest_assignment(u32 **distances, u32 ngoals)
 			}
 		}
 
-		trb_vector_remove_index(&unmatched_boxes, closest_j, NULL);
-		trb_vector_push_back(&matching, trb_get_ptr(Edge, goal, closest_box, closest_dist));
+		trb_vector_remove(&unmatched_boxes, closest_j, NULL);
+		matching[goal] = closest_box;
 	}
 
 	trb_vector_destroy(&unmatched_boxes, NULL);
 	trb_vector_destroy(&unmatched_goals, NULL);
 
-	Edge *result = trb_vector_steal0(&matching, NULL);
-
-	return result;
+	return matching;
 }
 
-Edge *greedy_assignment(u32 **distances, u32 ngoals)
+u32 *greedy_assignment(u32 ngoals, u32 (*distances)[ngoals][ngoals])
 {
 	TrbHeap pqueue;
 	trb_heap_init(&pqueue, sizeof(Edge), (TrbCmpFunc) cmp_edges);
@@ -366,29 +368,29 @@ Edge *greedy_assignment(u32 **distances, u32 ngoals)
 			Edge edge = {
 				.goal = goal,
 				.box = box,
-				.distance = distances[goal][box],
+				.distance = (*distances)[goal][box],
 			};
 
 			trb_heap_insert(&pqueue, &edge);
 		}
 	}
 
-	TrbVector matching;
-	trb_vector_init(&matching, TRUE, FALSE, sizeof(Edge));
+	u32 *matching = malloc(ngoals * sizeof(u32));
+	assert(matching != NULL);
 
 	TrbVector unmatched_boxes;
-	trb_vector_init(&unmatched_boxes, TRUE, FALSE, 4);
+	trb_vector_init(&unmatched_boxes, TRUE, 4);
 	for (u32 box = 0; box < ngoals; ++box) {
 		trb_vector_push_back(&unmatched_boxes, trb_get_ptr(u32, box));
 	}
 
 	TrbVector unmatched_goals;
-	trb_vector_init(&unmatched_goals, TRUE, FALSE, 4);
+	trb_vector_init(&unmatched_goals, TRUE, 4);
 	for (u32 goal = 0; goal < ngoals; ++goal) {
 		trb_vector_push_back(&unmatched_goals, trb_get_ptr(u32, goal));
 	}
 
-	while (pqueue.vector.len != 0) {
+	while (pqueue.deque.len != 0) {
 		Edge edge;
 		trb_heap_pop_back(&pqueue, &edge);
 
@@ -399,21 +401,21 @@ Edge *greedy_assignment(u32 **distances, u32 ngoals)
 		bool umg_contains = trb_vector_search(&unmatched_goals, &edge.goal, (TrbCmpFunc) trb_u32cmp, &umg_index);
 
 		if (umb_contains && umg_contains) {
-			trb_vector_push_back(&matching, &edge);
-			trb_vector_remove_index(&unmatched_boxes, umb_index, NULL);
-			trb_vector_remove_index(&unmatched_goals, umg_index, NULL);
+			matching[edge.goal] = edge.box;
+			trb_vector_remove(&unmatched_boxes, umb_index, NULL);
+			trb_vector_remove(&unmatched_goals, umg_index, NULL);
 		}
 	}
 
 	for (u32 i = 0; i < unmatched_goals.len; ++i) {
-		u32 goal = trb_vector_get_unsafe(&unmatched_goals, u32, i);
+		u32 goal = trb_vector_get(&unmatched_goals, u32, i);
 		u32 closest_j = 0;
-		u32 closest_box = trb_vector_get_unsafe(&unmatched_boxes, u32, 0);
-		u32 closest_dist = distances[goal][closest_box];
+		u32 closest_box = trb_vector_get(&unmatched_boxes, u32, 0);
+		u32 closest_dist = (*distances)[goal][closest_box];
 
 		for (u32 j = 1; j < unmatched_boxes.len; ++j) {
-			u32 box = trb_vector_get_unsafe(&unmatched_boxes, u32, j);
-			u32 dist = distances[goal][box];
+			u32 box = trb_vector_get(&unmatched_boxes, u32, j);
+			u32 dist = (*distances)[goal][box];
 
 			if (dist > closest_dist) {
 				closest_j = j;
@@ -422,15 +424,13 @@ Edge *greedy_assignment(u32 **distances, u32 ngoals)
 			}
 		}
 
-		trb_vector_remove_index(&unmatched_boxes, closest_j, NULL);
-		trb_vector_push_back(&matching, trb_get_ptr(Edge, goal, closest_box, closest_dist));
+		trb_vector_remove(&unmatched_boxes, closest_j, NULL);
+		matching[goal] = closest_box;
 	}
 
 	trb_vector_destroy(&unmatched_boxes, NULL);
 	trb_vector_destroy(&unmatched_goals, NULL);
 	trb_heap_destroy(&pqueue, NULL);
 
-	Edge *result = trb_vector_steal0(&matching, NULL);
-
-	return result;
+	return matching;
 }

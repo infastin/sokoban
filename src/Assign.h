@@ -3,8 +3,8 @@
 
 #include "Definitions.h"
 
-Edge *hungarian_assignment(u32 **distances, u32 ngoals);
-Edge *greedy_assignment(u32 **distances, u32 ngoals);
-Edge *closest_assignment(u32 **distances, u32 ngoals);
+u32 *hungarian_assignment(u32 ngoals, u32 (*distances)[ngoals][ngoals]);
+u32 *greedy_assignment(u32 ngoals, u32 (*distances)[ngoals][ngoals]);
+u32 *closest_assignment(u32 ngoals, u32 (*distances)[ngoals][ngoals]);
 
 #endif /* end of include guard: ASSIGN_H_TORHCHXI */
