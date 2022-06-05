@@ -1,672 +1,26 @@
 #include "Assign.h"
 #include "Definitions.h"
 #include "Distance.h"
+#include "Game.h"
 
 #include <assert.h>
+#include <getopt.h>
 #include <memory.h>
+#include <ncurses.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/timerfd.h>
 #include <tribble/Tribble.h>
-
-typedef struct {
-	TrbString solution;
-	point *positions;
-	u32 total_distance;
-	u32 distance;
-} State;
-
-State *state_init(State *state, State *init, usize ngoals)
-{
-	state->positions = calloc(ngoals + 1, sizeof(point));
-	assert(state->positions != NULL);
-
-	state->distance = 0;
-	state->total_distance = 0;
-
-	if (init != NULL) {
-		memcpy(state->positions, init->positions, (ngoals + 1) * sizeof(point));
-		state->distance = init->distance;
-		state->total_distance = init->total_distance;
-	}
-
-	trb_string_init0(&state->solution);
-
-	if (init != NULL && init->solution.data != NULL)
-		trb_string_assign(&state->solution, init->solution.data);
-
-	return state;
-}
-
-void state_destroy(State *state)
-{
-	free(state->positions);
-	trb_string_destroy(&state->solution);
-}
-
-i32 pos_cmp(const point *a, const point *b, u32 *data)
-{
-	u32 ngoals = *data;
-
-	for (u32 i = 0; i <= ngoals; ++i) {
-		if (a[i].x > b[i].x || a[i].y > b[i].y)
-			return 1;
-		if (a[i].x < b[i].x || a[i].y < b[i].y)
-			return -1;
-	}
-
-	return 0;
-}
-
-i32 state_cmp(const State *a, const State *b, u32 *data)
-{
-	if (a->total_distance > b->total_distance)
-		return -1;
-	if (a->total_distance < b->total_distance)
-		return 1;
-
-	return pos_cmp(a->positions, b->positions, data);
-}
-
-typedef struct _Game Game;
-
-struct _Game {
-	u32 width;
-	u32 height;
-	u32 ngoals;
-
-	point *goals;
-	u8 *board;
-	u8 *marks;
-
-	u32 *distances;
-	u32 *assignment;
-
-	State state;
-};
-
-Game *game_init(Game *game)
-{
-	game->width = 0;
-	game->height = 0;
-	game->ngoals = 0;
-	game->board = NULL;
-	game->goals = NULL;
-	game->marks = NULL;
-	game->distances = NULL;
-	game->assignment = NULL;
-
-	return game;
-}
-
-void game_destroy(Game *game)
-{
-	free(game->board);
-	free(game->goals);
-	free(game->marks);
-
-	if (game->distances != NULL)
-		free(game->distances);
-
-	if (game->assignment != NULL)
-		free(game->assignment);
-}
-
-void mark(Game *game, u32 x, u32 y)
-{
-	u32 w = game->width;
-	u32 h = game->height;
-
-	u8(*marks)[h][w] = (u8(*)[h][w]) game->marks;
-	u8(*board)[h][w] = (u8(*)[h][w]) game->board;
-
-	if ((*marks)[y][x])
-		return;
-
-	(*marks)[y][x] = 1;
-
-	if (x > 2 && (*board)[y][x - 1] != WALL && (*board)[y][x - 2] != WALL)
-		mark(game, x - 1, y);
-	if (x < w - 2 && (*board)[y][x + 1] != WALL && (*board)[y][x + 2] != WALL)
-		mark(game, x + 1, y);
-	if (y > 2 && (*board)[y - 1][x] != WALL && (*board)[y - 2][x] != WALL)
-		mark(game, x, y - 1);
-	if (y > 2 && (*board)[y + 1][x] != WALL && (*board)[y + 2][x] != WALL)
-		mark(game, x, y + 1);
-}
-
-u32 get_box(Game *game, State *state, u32 x, u32 y)
-{
-	for (u32 i = 1; i <= game->ngoals; ++i) {
-		point pos = state->positions[i];
-		if (pos.x == x && pos.y == y)
-			return i;
-	}
-
-	return -1;
-}
-
-bool is_solved(Game *game, State *state)
-{
-	for (u32 i = 0; i < game->ngoals; ++i) {
-		point goal = game->goals[i];
-		if (get_box(game, state, goal.x, goal.y) == -1)
-			return FALSE;
-	}
-
-	return TRUE;
-}
-
-bool move(Game *game, State *state, u32 x, u32 y, u32 dist, State *ret)
-{
-	u32 w = game->width;
-	u32 h = game->height;
-
-	u8(*board)[h][w] = (u8(*)[h][w]) game->board;
-
-	if ((*board)[y][x] == '#' || (*board)[y][x] == 0)
-		return FALSE;
-
-	state_init(ret, state, game->ngoals);
-	ret->positions[0] = (point){ x, y };
-	ret->distance = dist;
-
-	return TRUE;
-}
-
-bool push(Game *game, State *state, u32 px, u32 py, u32 bx, u32 by, u32 bi, u32 dist, State *ret)
-{
-	u32 w = game->width;
-	u32 h = game->height;
-
-	u8(*board)[h][w] = (u8(*)[h][w]) game->board;
-	u8(*marks)[h][w] = (u8(*)[h][w]) game->marks;
-
-	if (
-		(*board)[by][bx] == '#' ||
-		(*board)[by][bx] == 0 ||
-		(*marks)[by][bx] == 0 ||
-		get_box(game, state, bx, by) != -1
-	) {
-		return FALSE;
-	}
-
-	state_init(ret, state, game->ngoals);
-	ret->positions[0] = (point){ px, py };
-	ret->positions[bi] = (point){ bx, by };
-	ret->distance = dist;
-
-	return TRUE;
-}
-
-bool solve_dfs(Game *game, State *ret)
-{
-	State *init_state = &game->state;
-
-	TrbHashTable visited;
-	trb_hash_table_init_data(&visited, (game->ngoals + 1) * sizeof(point), 1, 0xdeadbeef, trb_jhash, (TrbCmpDataFunc) pos_cmp, &game->ngoals);
-	trb_hash_table_insert(&visited, init_state->positions, trb_get_ptr(bool, TRUE));
-
-	TrbDeque vertices;
-	trb_deque_init(&vertices, TRUE, sizeof(State));
-	trb_deque_push_back(&vertices, init_state);
-
-	while (vertices.len != 0) {
-		State vertex;
-		trb_deque_pop_front(&vertices, &vertex);
-
-		point pos = vertex.positions[0];
-		u32 x = pos.x;
-		u32 y = pos.y;
-
-		struct {
-			u32 px, py;
-			u32 bx, by;
-			char move_char;
-			char push_char;
-		} dirs[4] = {
-			{x - 1,  y,     x - 2, y,     'l', 'L'},
-			{ x,     y - 1, x,     y - 2, 'u', 'U'},
-			{ x + 1, y,     x + 2, y,     'r', 'R'},
-			{ x,     y + 1, x,     y + 2, 'd', 'D'},
-		};
-
-		for (u32 i = 0; i < 4; ++i) {
-			u32 px = dirs[i].px;
-			u32 py = dirs[i].py;
-			u32 bx = dirs[i].bx;
-			u32 by = dirs[i].by;
-
-			bool do_something;
-			State next;
-			char csol;
-
-			u32 bi = get_box(game, &vertex, px, py);
-			if (bi != -1) {
-				do_something = push(game, &vertex, px, py, bx, by, bi, 0, &next);
-				csol = dirs[i].push_char;
-			} else {
-				do_something = move(game, &vertex, px, py, 0, &next);
-				csol = dirs[i].move_char;
-			}
-
-			if (do_something) {
-				if (trb_hash_table_lookup(&visited, next.positions, NULL)) {
-					state_destroy(&next);
-					continue;
-				}
-
-				trb_string_push_back_c(&next.solution, csol);
-
-				if (is_solved(game, &next)) {
-					trb_hash_table_destroy(&visited, NULL, NULL);
-					trb_deque_destroy(&vertices, (TrbFreeFunc) state_destroy);
-					state_destroy(&vertex);
-
-					*ret = next;
-					return TRUE;
-				}
-
-				trb_deque_push_back(&vertices, &next);
-				trb_hash_table_insert(&visited, next.positions, trb_get_ptr(bool, TRUE));
-			}
-		}
-
-		state_destroy(&vertex);
-	}
-
-	trb_hash_table_destroy(&visited, NULL, NULL);
-	trb_deque_destroy(&vertices, (TrbFreeFunc) state_destroy);
-
-	return FALSE;
-}
-
-u32 heuristic(Game *game, State *state)
-{
-	u32 total = 0;
-
-	u32 w = game->width;
-	u32 h = game->height;
-
-	u32 *assignment = game->assignment;
-	u32(*distances)[game->ngoals][h][w] = (u32(*)[game->ngoals][h][w]) game->distances;
-
-	for (u32 goal = 0; goal < game->ngoals; ++goal) {
-		u32 box = assignment[goal] + 1;
-		point bp = state->positions[box];
-		total += (*distances)[goal][bp.y][bp.x];
-	}
-
-	return total;
-}
-
-bool solve_astar(Game *game, State *ret)
-{
-	State *init_state = &game->state;
-	u32 init_x = init_state->positions[0].x;
-	u32 init_y = init_state->positions[0].y;
-
-	TrbHashTable visited;
-	trb_hash_table_init_data(&visited, (game->ngoals + 1) * sizeof(point), 1, 0xdeadbeef, trb_jhash, (TrbCmpDataFunc) pos_cmp, &game->ngoals);
-	trb_hash_table_insert(&visited, init_state->positions, trb_get_ptr(bool, TRUE));
-
-	TrbHeap vertices;
-	trb_heap_init_data(&vertices, sizeof(State), (TrbCmpDataFunc) state_cmp, &game->ngoals);
-	trb_heap_insert(&vertices, init_state);
-
-	while (vertices.deque.len != 0) {
-		State vertex;
-		trb_heap_pop_front(&vertices, &vertex);
-		trb_hash_table_add(&visited, vertex.positions, trb_get_ptr(bool, TRUE));
-
-		point pos = vertex.positions[0];
-		u32 x = pos.x;
-		u32 y = pos.y;
-		u32 vd = vertex.distance;
-
-		u32 dl, du, dr, dd;
-
-		if (x == init_x) {
-			dl = 1;
-			dr = 1;
-		} else {
-			dl = (x > init_x) ? vd - 1 : vd + 1;
-			dr = (x > init_x) ? vd + 1 : vd - 1;
-		}
-
-		if (y == init_y) {
-			du = 1;
-			dd = 1;
-		} else {
-			du = (y > init_y) ? vd - 1 : vd + 1;
-			dd = (y > init_y) ? vd + 1 : vd - 1;
-		}
-
-		struct {
-			u32 px, py;
-			u32 bx, by;
-			u32 dist;
-			char move_char;
-			char push_char;
-		} dirs[4] = {
-			{x - 1,  y,     x - 2, y,     dl, 'l', 'L'},
-			{ x,     y - 1, x,     y - 2, du, 'u', 'U'},
-			{ x + 1, y,     x + 2, y,     dr, 'r', 'R'},
-			{ x,     y + 1, x,     y + 2, dd, 'd', 'D'},
-		};
-
-		for (u32 i = 0; i < 4; ++i) {
-			u32 px = dirs[i].px;
-			u32 py = dirs[i].py;
-			u32 bx = dirs[i].bx;
-			u32 by = dirs[i].by;
-			u32 d = dirs[i].dist;
-
-			bool do_something;
-			State next;
-			char csol;
-
-			u32 bi = get_box(game, &vertex, px, py);
-			if (bi != -1) {
-				do_something = push(game, &vertex, px, py, bx, by, bi, d, &next);
-				csol = dirs[i].push_char;
-			} else {
-				do_something = move(game, &vertex, px, py, d, &next);
-				csol = dirs[i].move_char;
-			}
-
-			if (do_something) {
-				if (trb_hash_table_lookup(&visited, next.positions, NULL)) {
-					state_destroy(&next);
-					continue;
-				}
-
-				trb_string_push_back_c(&next.solution, csol);
-
-				if (is_solved(game, &next)) {
-					trb_hash_table_destroy(&visited, NULL, NULL);
-					trb_heap_destroy(&vertices, (TrbFreeFunc) state_destroy);
-					state_destroy(&vertex);
-
-					*ret = next;
-					return TRUE;
-				}
-
-				u32 total_distance = vertex.distance + 1 + heuristic(game, &next);
-				usize index;
-
-				if (trb_heap_search(&vertices, &next, &index)) {
-					if (next.distance < vertex.distance + 1) {
-						State *old = trb_heap_ptr(&vertices, State, index);
-						state_destroy(old);
-
-						next.distance = vertex.distance + 1;
-						next.total_distance = total_distance;
-						trb_heap_set(&vertices, index, &next);
-					} else {
-						state_destroy(&next);
-					}
-				} else {
-					next.distance = vertex.distance + 1;
-					next.total_distance = total_distance;
-					trb_heap_insert(&vertices, &next);
-				}
-			}
-		}
-
-		state_destroy(&vertex);
-	}
-
-	trb_hash_table_destroy(&visited, NULL, NULL);
-	trb_heap_destroy(&vertices, (TrbFreeFunc) state_destroy);
-
-	return FALSE;
-}
-
-bool solve_cbfs(Game *game, State *ret)
-{
-	State *init_state = &game->state;
-	u32 init_x = init_state->positions[0].x;
-	u32 init_y = init_state->positions[0].y;
-
-	TrbHashTable visited;
-	trb_hash_table_init_data(&visited, (game->ngoals + 1) * sizeof(point), 1, 0xdeadbeef, trb_jhash, (TrbCmpDataFunc) pos_cmp, &game->ngoals);
-	trb_hash_table_insert(&visited, init_state->positions, trb_get_ptr(bool, TRUE));
-
-	TrbHeap vertices;
-	trb_heap_init_data(&vertices, sizeof(State), (TrbCmpDataFunc) state_cmp, &game->ngoals);
-	trb_heap_insert(&vertices, init_state);
-
-	while (vertices.deque.len != 0) {
-		State vertex;
-		trb_heap_pop_front(&vertices, &vertex);
-		trb_hash_table_add(&visited, vertex.positions, trb_get_ptr(bool, TRUE));
-
-		point pos = vertex.positions[0];
-		u32 x = pos.x;
-		u32 y = pos.y;
-		u32 vd = vertex.distance;
-
-		u32 dl, du, dr, dd;
-
-		if (x == init_x) {
-			dl = 1;
-			dr = 1;
-		} else {
-			dl = (x > init_x) ? vd - 1 : vd + 1;
-			dr = (x > init_x) ? vd + 1 : vd - 1;
-		}
-
-		if (y == init_y) {
-			du = 1;
-			dd = 1;
-		} else {
-			du = (y > init_y) ? vd - 1 : vd + 1;
-			dd = (y > init_y) ? vd + 1 : vd - 1;
-		}
-
-		struct {
-			u32 px, py;
-			u32 bx, by;
-			u32 dist;
-			char move_char;
-			char push_char;
-		} dirs[4] = {
-			{x - 1,  y,     x - 2, y,     dl, 'l', 'L'},
-			{ x,     y - 1, x,     y - 2, du, 'u', 'U'},
-			{ x + 1, y,     x + 2, y,     dr, 'r', 'R'},
-			{ x,     y + 1, x,     y + 2, dd, 'd', 'D'},
-		};
-
-		for (u32 i = 0; i < 4; ++i) {
-			u32 px = dirs[i].px;
-			u32 py = dirs[i].py;
-			u32 bx = dirs[i].bx;
-			u32 by = dirs[i].by;
-			u32 d = dirs[i].dist;
-
-			bool do_something;
-			State next;
-			char csol;
-
-			u32 bi = get_box(game, &vertex, px, py);
-			if (bi != -1) {
-				do_something = push(game, &vertex, px, py, bx, by, bi, d, &next);
-				csol = dirs[i].push_char;
-			} else {
-				do_something = move(game, &vertex, px, py, d, &next);
-				csol = dirs[i].move_char;
-			}
-
-			if (do_something) {
-				if (trb_hash_table_lookup(&visited, next.positions, NULL)) {
-					state_destroy(&next);
-					continue;
-				}
-
-				trb_string_push_back_c(&next.solution, csol);
-
-				if (is_solved(game, &next)) {
-					trb_hash_table_destroy(&visited, NULL, NULL);
-					trb_heap_destroy(&vertices, (TrbFreeFunc) state_destroy);
-					state_destroy(&vertex);
-
-					*ret = next;
-					return TRUE;
-				}
-
-				u32 total_distance = next.distance + heuristic(game, &next);
-
-				if (!trb_heap_search(&vertices, &next, NULL)) {
-					next.total_distance = total_distance;
-					trb_heap_insert(&vertices, &next);
-				} else {
-					state_destroy(&next);
-				}
-			}
-		}
-
-		state_destroy(&vertex);
-	}
-
-	trb_hash_table_destroy(&visited, NULL, NULL);
-	trb_heap_destroy(&vertices, (TrbFreeFunc) state_destroy);
-
-	return FALSE;
-}
-
-void parse_board(Game *game, u32 w, u32 h, const char *str)
-{
-	game->width = w;
-	game->height = h;
-
-	game->board = calloc(w * h, 1);
-	assert(game->board);
-
-	game->marks = calloc(w * h, 1);
-	assert(game->marks);
-
-	for (u32 i = 0; str[i]; ++i) {
-		switch (str[i]) {
-		case WALL:
-			game->board[i] = WALL;
-			continue;
-
-		case BOX:
-		case PLAYER:
-		case FLOOR:
-			game->board[i] = FLOOR;
-			continue;
-
-		case BOX_ON_GOAL:
-		case GOAL:
-		case PLAYER_ON_GOAL:
-			game->ngoals++;
-			game->board[i] = GOAL;
-			continue;
-
-		default:
-			continue;
-		}
-	}
-
-	state_init(&game->state, NULL, game->ngoals);
-	game->goals = calloc(game->ngoals, sizeof(point));
-	assert(game->goals != NULL);
-
-	u8(*board)[h][w] = (u8(*)[h][w]) game->board;
-
-	for (u32 y = 0, i = 0, j = 1, k = 0; y < h; ++y) {
-		for (u32 x = 0; x < w; ++x, ++i) {
-			if ((*board)[y][x] == GOAL)
-				mark(game, x, y);
-
-			switch (str[i]) {
-			case GOAL:
-				game->goals[k++] = (point){ x, y };
-				continue;
-
-			case PLAYER_ON_GOAL:
-				game->goals[k++] = (point){ x, y };
-			case PLAYER:
-				game->state.positions[0] = (point){ x, y };
-				continue;
-
-			case BOX_ON_GOAL:
-				game->goals[k++] = (point){ x, y };
-			case BOX:
-				game->state.positions[j++] = (point){ x, y };
-				continue;
-
-			default:
-				continue;
-			}
-		}
-	}
-}
-
-enum {
-	PULL_GOAL_DIST,
-	MANHATTAN_DIST,
-	PYTHAGOREAN_DIST,
-};
-
-void game_calc_distances(Game *game, int type)
-{
-	u32 w = game->width;
-	u32 h = game->height;
-
-	u8(*board)[h][w] = (u8(*)[h][w]) game->board;
-	u32(*distances)[game->ngoals][h][w] = malloc(sizeof *distances);
-	assert(distances != NULL);
-
-	switch (type) {
-	case PULL_GOAL_DIST:
-		pull_goal_distance(game->goals, game->state.positions, w, h, board, game->ngoals, distances);
-		break;
-	case MANHATTAN_DIST:
-		manhattan_distance(game->goals, game->state.positions, w, h, board, game->ngoals, distances);
-		break;
-	case PYTHAGOREAN_DIST:
-	default:
-		pythagorean_distance(game->goals, game->state.positions, w, h, board, game->ngoals, distances);
-		break;
-	}
-
-	game->distances = (u32 *) distances;
-}
-
-enum {
-	HUNGARIAN_ASSIGN,
-	GREEDY_ASSIGN,
-	CLOSEST_ASSIGN,
-};
-
-void game_do_assignment(Game *game, int type)
-{
-	u32 w = game->width;
-	u32 h = game->height;
-
-	u32(*distances)[game->ngoals][h][w] = (u32(*)[game->ngoals][h][w]) game->distances;
-	u32(*transformed)[game->ngoals][game->ngoals] = malloc(sizeof *transformed);
-	assert(transformed != NULL);
-
-	transform_distances(game->state.positions, w, h, game->ngoals, distances, transformed);
-
-	switch (type) {
-	case HUNGARIAN_ASSIGN:
-		game->assignment = hungarian_assignment(game->ngoals, transformed);
-		break;
-	case GREEDY_ASSIGN:
-		game->assignment = greedy_assignment(game->ngoals, transformed);
-		break;
-	default:
-	case CLOSEST_ASSIGN:
-		game->assignment = closest_assignment(game->ngoals, transformed);
-		break;
-	}
-
-	free(transformed);
-}
+#include <unistd.h>
+
+#define WALL_PAIR (COLOR_PAIR(1))
+#define FLOOR_PAIR (COLOR_PAIR(2))
+#define PLAYER_PAIR (COLOR_PAIR(3))
+#define BOX_PAIR (COLOR_PAIR(4))
+#define GOAL_PAIR (COLOR_PAIR(5))
+#define PLAYER_ON_GOAL_PAIR (COLOR_PAIR(6))
+#define BOX_ON_GOAL_PAIR (COLOR_PAIR(7))
 
 void show_board(const Game *game, const State *state)
 {
@@ -692,65 +46,385 @@ void show_board(const Game *game, const State *state)
 			(*board)[b.y][b.x] = BOX;
 	}
 
-	u8(*marks)[h][w] = (u8(*)[h][w]) game->marks;
-
 	for (u32 y = 0; y < h; ++y) {
 		for (u32 x = 0; x < w; ++x) {
-			if ((*board)[y][x]) {
-				if ((*board)[y][x] != FLOOR)
-					putchar((*board)[y][x]);
-				else if ((*marks)[y][x] == 0)
-					putchar('x');
-				else
-					putchar(FLOOR);
-
-			} else {
-				putchar(FLOOR);
+			switch ((*board)[y][x]) {
+			case WALL:
+				attron(WALL_PAIR);
+				addch(' ');
+				attroff(WALL_PAIR);
+				break;
+			case 0:
+			case FLOOR:
+				attron(FLOOR_PAIR);
+				addch(' ');
+				attroff(FLOOR_PAIR);
+				break;
+			case PLAYER:
+				attron(PLAYER_PAIR);
+				addch('@');
+				attroff(PLAYER_PAIR);
+				break;
+			case BOX:
+				attron(BOX_PAIR);
+				addch('$');
+				attroff(BOX_PAIR);
+				break;
+			case GOAL:
+				attron(GOAL_PAIR);
+				addch('.');
+				attroff(GOAL_PAIR);
+				break;
+			case PLAYER_ON_GOAL:
+				attron(PLAYER_ON_GOAL_PAIR);
+				addch('+');
+				attroff(PLAYER_ON_GOAL_PAIR);
+				break;
+			case BOX_ON_GOAL:
+				attron(BOX_ON_GOAL_PAIR);
+				addch('.');
+				attroff(BOX_ON_GOAL_PAIR);
+				break;
 			}
 		}
 
-		putchar('\n');
+		addch('\n');
 	}
 
 	free(board);
 }
 
+typedef struct {
+	u32 px, py;
+	u32 bx, by;
+	char type;
+} Action;
+
+Action *parse_solution(const char *solution, usize len, u32 init_x, u32 init_y)
+{
+	Action *actions = malloc(len * sizeof(Action));
+	assert(actions != NULL);
+
+	u32 px = init_x;
+	u32 py = init_y;
+
+	u32 bx = init_x;
+	u32 by = init_y;
+
+	const char *s = solution;
+	for (u32 i = 0; *s; ++s, ++i) {
+		switch (*s) {
+		case 'l':
+			px -= 1;
+			actions[i].type = 'm';
+			break;
+		case 'u':
+			py -= 1;
+			actions[i].type = 'm';
+			break;
+		case 'r':
+			px += 1;
+			actions[i].type = 'm';
+			break;
+		case 'd':
+			py += 1;
+			actions[i].type = 'm';
+			break;
+		case 'L':
+			px -= 1;
+			bx = px - 1;
+			by = py;
+			actions[i].type = 'p';
+			break;
+		case 'U':
+			py -= 1;
+			bx = px;
+			by = py - 1;
+			actions[i].type = 'p';
+			break;
+		case 'R':
+			px += 1;
+			bx = px + 1;
+			by = py;
+			actions[i].type = 'p';
+			break;
+		case 'D':
+			py += 1;
+			bx = px;
+			by = py + 1;
+			actions[i].type = 'p';
+			break;
+		}
+
+		actions[i].px = px;
+		actions[i].py = py;
+		actions[i].bx = bx;
+		actions[i].by = by;
+	}
+
+	return actions;
+}
+
+void visual_move(Game *game, u32 old_x, u32 old_y, u32 new_x, u32 new_y)
+{
+	u32 w = game->width;
+	u32 h = game->height;
+
+	u8(*board)[h][w] = (u8(*)[h][w]) game->board;
+
+	if ((*board)[old_y][old_x] == GOAL) {
+		attron(GOAL_PAIR);
+		mvaddch(old_y, old_x, '.');
+		attroff(GOAL_PAIR);
+	} else {
+		attron(FLOOR_PAIR);
+		mvaddch(old_y, old_x, ' ');
+		attroff(FLOOR_PAIR);
+	}
+
+	if ((*board)[new_y][new_x] == GOAL) {
+		attron(PLAYER_ON_GOAL_PAIR);
+		mvaddch(new_y, new_x, '+');
+		attroff(PLAYER_ON_GOAL_PAIR);
+	} else {
+		attron(PLAYER_PAIR);
+		mvaddch(new_y, new_x, '@');
+		attroff(PLAYER_PAIR);
+	}
+}
+
+void visual_push(Game *game, u32 old_x, u32 old_y, u32 new_x, u32 new_y)
+{
+	u32 w = game->width;
+	u32 h = game->height;
+
+	u8(*board)[h][w] = (u8(*)[h][w]) game->board;
+
+	if ((*board)[old_y][old_x] == GOAL) {
+		attron(GOAL_PAIR);
+		mvaddch(old_y, old_x, '.');
+		attroff(GOAL_PAIR);
+	} else {
+		attron(FLOOR_PAIR);
+		mvaddch(old_y, old_x, ' ');
+		attroff(FLOOR_PAIR);
+	}
+
+	if ((*board)[new_y][new_x] == GOAL) {
+		attron(BOX_ON_GOAL_PAIR);
+		mvaddch(new_y, new_x, '*');
+		attroff(BOX_ON_GOAL_PAIR);
+	} else {
+		attron(BOX_PAIR);
+		mvaddch(new_y, new_x, '$');
+		attroff(BOX_PAIR);
+	}
+}
+
+#define handle_error(str)   \
+	{                       \
+		perror(str);        \
+		exit(EXIT_FAILURE); \
+	}
+
 int main(int argc, char *argv[])
 {
-	const char *s = "#######"
-					"#     #"
-					"#     #"
-					"#. #  #"
-					"#. $$ #"
-					"#.$$  #"
-					"#.#  @#"
-					"#######";
+	char *filename = NULL;
+	bool (*solver)(Game * game, State * ret) = NULL;
 
-	const char *p = "  ###   "
-					"  #.#   "
-					"  # ####"
-					"###$ $.#"
-					"#. $@###"
-					"####$#  "
-					"   #.#  "
-					"   ###  ";
+	int choice;
+	while (1) {
+		static struct option long_options[] = {
+			{"astar", no_argument, 0, 'a'},
+			{ "cbfs", no_argument, 0, 'c'},
+			{ "dfs",  no_argument, 0, 'd'},
+			{ "help", no_argument, 0, 'h'},
+
+			{ 0,      0,           0, 0  }
+		};
+
+		int option_index = 0;
+
+		choice = getopt_long(argc, argv, "acdhf:", long_options, &option_index);
+		if (choice == -1)
+			break;
+
+		switch (choice) {
+		case 'h':
+			printf("%s: <solver> <file>\n", argv[0]);
+			printf("\nSolvers:\n");
+			printf(" -c, --cbfs \tComplete Best First Search algorithm\n");
+			printf(" -a, --astar\tA* Search algorithm\n");
+			printf(" -d, --dfs  \tDepth First Search algorithm\n");
+			return 0;
+		case 'a':
+			solver = game_solve_astar;
+			break;
+		case 'c':
+			solver = game_solve_cbfs;
+			break;
+		case 'd':
+			solver = game_solve_dfs;
+			break;
+		default:
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	if (optind == argc) {
+		fprintf(stderr, "The file with a level wasn't specified!\n");
+		exit(EXIT_FAILURE);
+	}
+
+	filename = argv[optind];
+
+	if (solver == NULL) {
+		fprintf(stderr, "No solver specified!\n");
+		exit(EXIT_FAILURE);
+	}
+
+	FILE *level = fopen(filename, "r");
+	if (level == NULL)
+		handle_error("fopen");
+
+	u32 w, h;
+	if (fscanf(level, " %u %u", &w, &h) < 2) {
+		fprintf(stderr, "Wrong level format!\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char(*board)[h][w] = malloc(sizeof *board);
+	assert(board != NULL);
+
+	for (u32 y = 0; y < h; ++y) {
+		for (u32 x = 0; x < w;) {
+			int c = fgetc(level);
+			if (c == '\n')
+				continue;
+			(*board)[y][x++] = c;
+		}
+	}
+
+	initscr();
+	noecho();
+	cbreak();
+	curs_set(0);
+
+	if (has_colors() == FALSE) {
+		endwin();
+		fprintf(stderr, "Your terminal doesn't support colors!\n");
+		exit(EXIT_FAILURE);
+	}
+
+	start_color();
+
+	init_pair(1, COLOR_WHITE, COLOR_WHITE);
+	init_pair(2, COLOR_BLACK, COLOR_BLACK);
+	init_pair(3, COLOR_BLACK, COLOR_BLUE);
+	init_pair(4, COLOR_BLACK, COLOR_YELLOW);
+	init_pair(5, COLOR_BLACK, COLOR_RED);
+	init_pair(6, COLOR_BLACK, COLOR_CYAN);
+	init_pair(7, COLOR_BLACK, COLOR_GREEN);
 
 	Game game;
 	game_init(&game);
-	parse_board(&game, 7, 8, s);
+	game_parse_board(&game, w, h, (const char *) board);
+
+	show_board(&game, &game.state);
+	printw("Calculating...");
+	refresh();
+
 	game_calc_distances(&game, PULL_GOAL_DIST);
 	game_do_assignment(&game, HUNGARIAN_ASSIGN);
 
-	show_board(&game, &game.state);
+	State sol;
+	bool solved = game_solve_dfs(&game, &sol);
 
-	State kek;
-	bool solution = solve_cbfs(&game, &kek);
+	clear();
 
-	if (solution) {
-		printf("%s\n", kek.solution.data);
-		state_destroy(&kek);
+	if (solved) {
+		show_board(&game, &game.state);
+		printw("Press 'q' or Ctrl-C to exit\n");
+		refresh();
+
+		u32 init_x = game.state.positions[0].x;
+		u32 init_y = game.state.positions[0].y;
+
+		u32 actions_len = sol.solution.len;
+		Action *actions = parse_solution(sol.solution.data, actions_len, init_x, init_y);
+
+		int tfd = timerfd_create(CLOCK_REALTIME, 0);
+		if (tfd < 0)
+			handle_error("timerfd_create");
+
+		struct pollfd ufds[2] = {
+			{tfd,           POLLIN},
+			{ STDIN_FILENO, POLLIN},
+		};
+
+		struct itimerspec timer = {
+			.it_value = {1,  0        },
+			.it_interval = { 0, 500000000},
+		};
+
+		if (timerfd_settime(tfd, 0, &timer, NULL) < 0)
+			handle_error("timerfd_settime");
+
+		timer.it_value.tv_sec = 0;
+		timer.it_value.tv_nsec = 500000000;
+
+		u32 old_px = init_x;
+		u32 old_py = init_y;
+		u32 i = 0;
+
+		while (1) {
+			if (poll(ufds, 2, -1) == -1) {
+				refresh();
+				continue;
+			}
+
+			if (ufds[0].revents & POLLIN) {
+				u32 new_px = actions[i].px;
+				u32 new_py = actions[i].py;
+				u32 new_bx = actions[i].bx;
+				u32 new_by = actions[i].by;
+
+				u32 old_bx = new_px;
+				u32 old_by = new_py;
+
+				if (actions[i].type == 'p') {
+					visual_push(&game, old_bx, old_by, new_bx, new_by);
+				}
+
+				visual_move(&game, old_px, old_py, new_px, new_py);
+
+				old_px = new_px;
+				old_py = new_py;
+				i++;
+
+				refresh();
+
+				if (i == actions_len) {
+					timer.it_value.tv_sec = 0;
+					timer.it_value.tv_nsec = 0;
+				}
+
+				if (timerfd_settime(tfd, 0, &timer, NULL) < 0)
+					handle_error("timerfd_settime");
+			}
+
+			if (ufds[1].revents & POLLIN) {
+				if (getch() == 'q')
+					break;
+			}
+		}
+	} else {
+		printw("No solution was found!\n");
+		printw("Press 'q' or Ctrl-C to exit\n");
+		refresh();
 	}
 
+	endwin();
 	game_destroy(&game);
 
 	return 0;

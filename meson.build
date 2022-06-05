@@ -3,7 +3,7 @@ project('sokoban', 'c',
   default_options: [
     'buildtype=debug',
     'warning_level=1',
-    'c_std=gnu11',
+    'c_std=gnu2x',
   ],
   license: 'MIT'
 )
