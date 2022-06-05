@@ -6,7 +6,7 @@
 #include <math.h>
 #include <memory.h>
 #include <stdlib.h>
-#include <tribble/Tribble.h>
+#include <tribble/tribble.h>
 
 void pull_goal_distance(
 	point *goals,

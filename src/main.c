@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/timerfd.h>
-#include <tribble/Tribble.h>
+#include <tribble/tribble.h>
 #include <unistd.h>
 
 #define WALL_PAIR (COLOR_PAIR(1))

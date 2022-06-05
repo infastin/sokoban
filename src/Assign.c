@@ -4,7 +4,7 @@
 
 #include <assert.h>
 #include <memory.h>
-#include <tribble/Tribble.h>
+#include <tribble/tribble.h>
 
 enum {
 	NONE,

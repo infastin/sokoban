@@ -1,7 +1,7 @@
 #ifndef DEFINITIONS_H_KKTMTE8L
 #define DEFINITIONS_H_KKTMTE8L
 
-#include <tribble/Types.h>
+#include <tribble/trb-types.h>
 
 enum {
 	FLOOR = ' ',

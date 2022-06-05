@@ -3,7 +3,7 @@
 
 #include "Definitions.h"
 
-#include <tribble/Tribble.h>
+#include <tribble/tribble.h>
 
 typedef struct {
 	TrbString solution;
