@@ -7,7 +7,7 @@ source_files = [
 
 math_dep = cxx.find_library('m')
 ncurses_dep = cxx.find_library('ncurses')
-libtribble_dep = dependency('tribble')
+libtribble_dep = dependency('libtribble-1.0')
 
 executable('main', 'main.c',
   sources: source_files,
