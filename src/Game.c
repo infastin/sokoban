@@ -150,7 +150,7 @@ static bool is_solved(Game *game, State *state)
 	return TRUE;
 }
 
-static bool game_move(Game *game, State *state, u32 x, u32 y, u32 dist, State *ret)
+static bool game_move(Game *game, State *state, u32 x, u32 y, State *ret)
 {
 	u32 w = game->width;
 	u32 h = game->height;
@@ -162,12 +162,11 @@ static bool game_move(Game *game, State *state, u32 x, u32 y, u32 dist, State *r
 
 	state_init(ret, state, game->ngoals);
 	ret->positions[0] = (point){ x, y };
-	ret->distance = dist;
 
 	return TRUE;
 }
 
-static bool game_push(Game *game, State *state, u32 px, u32 py, u32 bx, u32 by, u32 bi, u32 dist, State *ret)
+static bool game_push(Game *game, State *state, u32 px, u32 py, u32 bx, u32 by, u32 bi, State *ret)
 {
 	u32 w = game->width;
 	u32 h = game->height;
@@ -187,7 +186,6 @@ static bool game_push(Game *game, State *state, u32 px, u32 py, u32 bx, u32 by, 
 	state_init(ret, state, game->ngoals);
 	ret->positions[0] = (point){ px, py };
 	ret->positions[bi] = (point){ bx, by };
-	ret->distance = dist;
 
 	return TRUE;
 }
@@ -237,10 +235,10 @@ bool game_solve_dfs(Game *game, State *ret)
 
 			u32 bi = game_get_box(game, &vertex, px, py);
 			if (bi != -1) {
-				do_something = game_push(game, &vertex, px, py, bx, by, bi, 0, &next);
+				do_something = game_push(game, &vertex, px, py, bx, by, bi, &next);
 				csol = dirs[i].push_char;
 			} else {
-				do_something = game_move(game, &vertex, px, py, 0, &next);
+				do_something = game_move(game, &vertex, px, py, &next);
 				csol = dirs[i].move_char;
 			}
 
@@ -356,7 +354,7 @@ bool game_solve_astar(Game *game, State *ret)
 			u32 py = dirs[i].py;
 			u32 bx = dirs[i].bx;
 			u32 by = dirs[i].by;
-			u32 d = dirs[i].dist;
+			// u32 d = dirs[i].dist;
 
 			bool do_something;
 			State next;
@@ -364,10 +362,10 @@ bool game_solve_astar(Game *game, State *ret)
 
 			u32 bi = game_get_box(game, &vertex, px, py);
 			if (bi != -1) {
-				do_something = game_push(game, &vertex, px, py, bx, by, bi, d, &next);
+				do_something = game_push(game, &vertex, px, py, bx, by, bi, &next);
 				csol = dirs[i].push_char;
 			} else {
-				do_something = game_move(game, &vertex, px, py, d, &next);
+				do_something = game_move(game, &vertex, px, py, &next);
 				csol = dirs[i].move_char;
 			}
 
@@ -397,11 +395,12 @@ bool game_solve_astar(Game *game, State *ret)
 					State *old = trb_heap_ptr(&vertices, State, index);
 
 					if (next.distance < old->distance) {
-						state_destroy(old);
-						trb_heap_set(&vertices, index, &next);
-					} else {
-						state_destroy(&next);
+						old->distance = next.distance;
+						old->total_distance = next.total_distance;
+						trb_heap_fix(&vertices);
 					}
+
+					state_destroy(&next);
 				} else {
 					trb_heap_insert(&vertices, &next);
 				}
@@ -487,10 +486,10 @@ bool game_solve_cbfs(Game *game, State *ret)
 
 			u32 bi = game_get_box(game, &vertex, px, py);
 			if (bi != -1) {
-				do_something = game_push(game, &vertex, px, py, bx, by, bi, d, &next);
+				do_something = game_push(game, &vertex, px, py, bx, by, bi, &next);
 				csol = dirs[i].push_char;
 			} else {
-				do_something = game_move(game, &vertex, px, py, d, &next);
+				do_something = game_move(game, &vertex, px, py, &next);
 				csol = dirs[i].move_char;
 			}
 
