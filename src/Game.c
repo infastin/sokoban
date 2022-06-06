@@ -388,15 +388,16 @@ bool game_solve_astar(Game *game, State *ret)
 					return TRUE;
 				}
 
-				next.total_distance = d + heuristic(game, &next);
+				next.distance = vertex.distance + 1;
+				next.total_distance = next.distance + heuristic(game, &next);
+
 				usize index;
 
 				if (trb_heap_search_data(&vertices, &next, (TrbCmpDataFunc) state_cmp, &game->ngoals, &index)) {
 					State *old = trb_heap_ptr(&vertices, State, index);
 
-					if (next.total_distance < old->total_distance) {
+					if (next.distance < old->distance) {
 						state_destroy(old);
-						next.total_distance = next.total_distance;
 						trb_heap_set(&vertices, index, &next);
 					} else {
 						state_destroy(&next);

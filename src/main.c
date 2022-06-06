@@ -231,43 +231,58 @@ int main(int argc, char *argv[])
 {
 	char *filename = NULL;
 	bool (*solver)(Game * game, State * ret) = NULL;
+	int distance_metric = -1;
+	int assignment_alg = -1;
 
 	int choice;
 	while (1) {
 		static struct option long_options[] = {
-			{"astar", no_argument, 0, 'a'},
-			{ "cbfs", no_argument, 0, 'c'},
-			{ "dfs",  no_argument, 0, 'd'},
-			{ "help", no_argument, 0, 'h'},
+			{"astar",        no_argument, 0, 'a'},
+			{ "cbfs",        no_argument, 0, 'c'},
+			{ "dfs",         no_argument, 0, 'd'},
+			{ "help",        no_argument, 0, 'h'},
+			{ "hungarian",   no_argument, 0, 'H'},
+			{ "greedy",      no_argument, 0, 'G'},
+			{ "closest",     no_argument, 0, 'C'},
+			{ "goal_pull",   no_argument, 0, 'g'},
+			{ "manhattan",   no_argument, 0, 'm'},
+			{ "pythagorean", no_argument, 0, 'p'},
 
-			{ 0,      0,           0, 0  }
+			{ 0,             0,           0, 0  }
 		};
 
 		int option_index = 0;
 
-		choice = getopt_long(argc, argv, "acdhf:", long_options, &option_index);
+		choice = getopt_long(argc, argv, "acdhGCHgmp", long_options, &option_index);
 		if (choice == -1)
 			break;
 
 		switch (choice) {
 		case 'h':
-			printf("%s: <solver> <file>\n", argv[0]);
+			printf("%s: <solver> <distance> <assignment> <file>\n", argv[0]);
 			printf("\nSolvers:\n");
 			printf(" -c, --cbfs \tComplete Best First Search algorithm\n");
 			printf(" -a, --astar\tA* Search algorithm\n");
 			printf(" -d, --dfs  \tDepth First Search algorithm\n");
+			printf("\nDistance metrics:\n");
+			printf(" -g, --goal_pull  \tGoal Pull\n");
+			printf(" -m, --manhattan  \tManhattan\n");
+			printf(" -p, --pythagorean\tPythagorean\n");
+			printf("\nAssignment algorithms:\n");
+			printf(" -G, --greedy   \tGreedy\n");
+			printf(" -C, --closest  \tClosest\n");
+			printf(" -H, --hungarian\tHungarian\n");
 			return 0;
-		case 'a':
-			solver = game_solve_astar;
-			break;
-		case 'c':
-			solver = game_solve_cbfs;
-			break;
-		case 'd':
-			solver = game_solve_dfs;
-			break;
-		default:
-			exit(EXIT_FAILURE);
+		case 'a': solver = game_solve_astar; break;
+		case 'c': solver = game_solve_cbfs; break;
+		case 'd': solver = game_solve_dfs; break;
+		case 'g': distance_metric = PULL_GOAL_DIST; break;
+		case 'm': distance_metric = MANHATTAN_DIST; break;
+		case 'p': distance_metric = PYTHAGOREAN_DIST; break;
+		case 'G': assignment_alg = GREEDY_ASSIGN; break;
+		case 'C': assignment_alg = CLOSEST_ASSIGN; break;
+		case 'H': assignment_alg = HUNGARIAN_ASSIGN; break;
+		default: exit(EXIT_FAILURE);
 		}
 	}
 
@@ -280,6 +295,16 @@ int main(int argc, char *argv[])
 
 	if (solver == NULL) {
 		fprintf(stderr, "No solver specified!\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (solver != game_solve_dfs && distance_metric == -1) {
+		fprintf(stderr, "No distance metric specified!\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (solver != game_solve_dfs && assignment_alg == -1) {
+		fprintf(stderr, "No assignment algorithm specified!\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -334,8 +359,10 @@ int main(int argc, char *argv[])
 	printw("Calculating...");
 	refresh();
 
-	game_calc_distances(&game, PULL_GOAL_DIST);
-	game_do_assignment(&game, HUNGARIAN_ASSIGN);
+	if (solver != game_solve_dfs) {
+		game_calc_distances(&game, distance_metric);
+		game_do_assignment(&game, assignment_alg);
+	}
 
 	State sol;
 	bool solved = solver(&game, &sol);
@@ -344,6 +371,7 @@ int main(int argc, char *argv[])
 
 	if (solved) {
 		show_board(&game, &game.state);
+		printw("Length: %lu\n", sol.solution.len);
 		printw("Press 'q' or Ctrl-C to exit\n");
 		refresh();
 
