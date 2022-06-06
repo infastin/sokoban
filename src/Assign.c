@@ -390,7 +390,7 @@ u32 *greedy_assignment(u32 ngoals, u32 (*distances)[ngoals][ngoals])
 		trb_vector_push_back(&unmatched_goals, trb_get_ptr(u32, goal));
 	}
 
-	while (pqueue.deque.len != 0) {
+	while (pqueue.vector.len != 0) {
 		Edge edge;
 		trb_heap_pop_back(&pqueue, &edge);
 

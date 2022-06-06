@@ -118,13 +118,13 @@ static void mark(Game *game, u32 x, u32 y)
 
 	(*marks)[y][x] = 1;
 
-	if (x > 2 && (*board)[y][x - 1] != WALL && (*board)[y][x - 2] != WALL)
+	if (x > 1 && (*board)[y][x - 1] != WALL && (*board)[y][x - 2] != WALL)
 		mark(game, x - 1, y);
 	if (x < w - 2 && (*board)[y][x + 1] != WALL && (*board)[y][x + 2] != WALL)
 		mark(game, x + 1, y);
-	if (y > 2 && (*board)[y - 1][x] != WALL && (*board)[y - 2][x] != WALL)
+	if (y > 1 && (*board)[y - 1][x] != WALL && (*board)[y - 2][x] != WALL)
 		mark(game, x, y - 1);
-	if (y > 2 && (*board)[y + 1][x] != WALL && (*board)[y + 2][x] != WALL)
+	if (y < h - 2 && (*board)[y + 1][x] != WALL && (*board)[y + 2][x] != WALL)
 		mark(game, x, y + 1);
 }
 
@@ -310,7 +310,7 @@ bool game_solve_astar(Game *game, State *ret)
 	trb_heap_init_data(&vertices, sizeof(State), (TrbCmpDataFunc) state_pcmp, &game->ngoals);
 	trb_heap_insert(&vertices, &init_state);
 
-	while (vertices.deque.len != 0) {
+	while (vertices.vector.len != 0) {
 		State vertex;
 		trb_heap_pop_front(&vertices, &vertex);
 		trb_hash_table_add(&visited, vertex.positions, trb_get_ptr(bool, TRUE));
@@ -388,23 +388,20 @@ bool game_solve_astar(Game *game, State *ret)
 					return TRUE;
 				}
 
-				u32 total_distance = d + heuristic(game, &next);
+				next.total_distance = d + heuristic(game, &next);
 				usize index;
 
 				if (trb_heap_search_data(&vertices, &next, (TrbCmpDataFunc) state_cmp, &game->ngoals, &index)) {
-					if (next.distance < vertex.distance + 1) {
-						State *old = trb_heap_ptr(&vertices, State, index);
-						state_destroy(old);
+					State *old = trb_heap_ptr(&vertices, State, index);
 
-						next.distance = vertex.distance + 1;
-						next.total_distance = total_distance;
+					if (next.total_distance < old->total_distance) {
+						state_destroy(old);
+						next.total_distance = next.total_distance;
 						trb_heap_set(&vertices, index, &next);
 					} else {
 						state_destroy(&next);
 					}
 				} else {
-					next.distance = vertex.distance + 1;
-					next.total_distance = total_distance;
 					trb_heap_insert(&vertices, &next);
 				}
 			}
@@ -435,7 +432,7 @@ bool game_solve_cbfs(Game *game, State *ret)
 	trb_heap_init_data(&vertices, sizeof(State), (TrbCmpDataFunc) state_pcmp, &game->ngoals);
 	trb_heap_insert(&vertices, &init_state);
 
-	while (vertices.deque.len != 0) {
+	while (vertices.vector.len != 0) {
 		State vertex;
 		trb_heap_pop_front(&vertices, &vertex);
 		trb_hash_table_add(&visited, vertex.positions, trb_get_ptr(bool, TRUE));
@@ -513,10 +510,9 @@ bool game_solve_cbfs(Game *game, State *ret)
 					return TRUE;
 				}
 
-				u32 total_distance = d + heuristic(game, &next);
+				next.total_distance = d + heuristic(game, &next);
 
 				if (!trb_heap_search_data(&vertices, &next, (TrbCmpDataFunc) state_cmp, &game->ngoals, NULL)) {
-					next.total_distance = total_distance;
 					trb_heap_insert(&vertices, &next);
 				} else {
 					state_destroy(&next);

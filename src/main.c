@@ -338,7 +338,7 @@ int main(int argc, char *argv[])
 	game_do_assignment(&game, HUNGARIAN_ASSIGN);
 
 	State sol;
-	bool solved = game_solve_dfs(&game, &sol);
+	bool solved = solver(&game, &sol);
 
 	clear();
 
@@ -422,6 +422,7 @@ int main(int argc, char *argv[])
 		printw("No solution was found!\n");
 		printw("Press 'q' or Ctrl-C to exit\n");
 		refresh();
+		getch();
 	}
 
 	endwin();
