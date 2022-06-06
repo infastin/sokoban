@@ -297,9 +297,6 @@ bool game_solve_astar(Game *game, State *ret)
 	State init_state;
 	state_init(&init_state, &game->state, game->ngoals);
 
-	u32 init_x = init_state.positions[0].x;
-	u32 init_y = init_state.positions[0].y;
-
 	TrbHashTable visited;
 	trb_hash_table_init_data(&visited, (game->ngoals + 1) * sizeof(point), 1, 0xdeadbeef, trb_jhash, (TrbCmpDataFunc) pos_cmp, &game->ngoals);
 	trb_hash_table_insert(&visited, init_state.positions, trb_get_ptr(bool, TRUE));
@@ -316,37 +313,17 @@ bool game_solve_astar(Game *game, State *ret)
 		point pos = vertex.positions[0];
 		u32 x = pos.x;
 		u32 y = pos.y;
-		u32 vd = vertex.distance;
-
-		u32 dl, du, dr, dd;
-
-		if (x == init_x) {
-			dl = 1;
-			dr = 1;
-		} else {
-			dl = (x > init_x) ? vd - 1 : vd + 1;
-			dr = (x > init_x) ? vd + 1 : vd - 1;
-		}
-
-		if (y == init_y) {
-			du = 1;
-			dd = 1;
-		} else {
-			du = (y > init_y) ? vd - 1 : vd + 1;
-			dd = (y > init_y) ? vd + 1 : vd - 1;
-		}
 
 		struct {
 			u32 px, py;
 			u32 bx, by;
-			u32 dist;
 			char move_char;
 			char push_char;
 		} dirs[4] = {
-			{x - 1,  y,     x - 2, y,     dl, 'l', 'L'},
-			{ x,     y - 1, x,     y - 2, du, 'u', 'U'},
-			{ x + 1, y,     x + 2, y,     dr, 'r', 'R'},
-			{ x,     y + 1, x,     y + 2, dd, 'd', 'D'},
+			{x - 1,  y,     x - 2, y,     'l', 'L'},
+			{ x,     y - 1, x,     y - 2, 'u', 'U'},
+			{ x + 1, y,     x + 2, y,     'r', 'R'},
+			{ x,     y + 1, x,     y + 2, 'd', 'D'},
 		};
 
 		for (u32 i = 0; i < 4; ++i) {
@@ -354,7 +331,6 @@ bool game_solve_astar(Game *game, State *ret)
 			u32 py = dirs[i].py;
 			u32 bx = dirs[i].bx;
 			u32 by = dirs[i].by;
-			// u32 d = dirs[i].dist;
 
 			bool do_something;
 			State next;
@@ -421,9 +397,6 @@ bool game_solve_cbfs(Game *game, State *ret)
 	State init_state;
 	state_init(&init_state, &game->state, game->ngoals);
 
-	u32 init_x = init_state.positions[0].x;
-	u32 init_y = init_state.positions[0].y;
-
 	TrbHashTable visited;
 	trb_hash_table_init_data(&visited, (game->ngoals + 1) * sizeof(point), 1, 0xdeadbeef, trb_jhash, (TrbCmpDataFunc) pos_cmp, &game->ngoals);
 	trb_hash_table_insert(&visited, init_state.positions, trb_get_ptr(bool, TRUE));
@@ -440,37 +413,17 @@ bool game_solve_cbfs(Game *game, State *ret)
 		point pos = vertex.positions[0];
 		u32 x = pos.x;
 		u32 y = pos.y;
-		u32 vd = vertex.distance;
-
-		u32 dl, du, dr, dd;
-
-		if (x == init_x) {
-			dl = 1;
-			dr = 1;
-		} else {
-			dl = (x > init_x) ? vd - 1 : vd + 1;
-			dr = (x > init_x) ? vd + 1 : vd - 1;
-		}
-
-		if (y == init_y) {
-			du = 1;
-			dd = 1;
-		} else {
-			du = (y > init_y) ? vd - 1 : vd + 1;
-			dd = (y > init_y) ? vd + 1 : vd - 1;
-		}
 
 		struct {
 			u32 px, py;
 			u32 bx, by;
-			u32 dist;
 			char move_char;
 			char push_char;
 		} dirs[4] = {
-			{x - 1,  y,     x - 2, y,     dl, 'l', 'L'},
-			{ x,     y - 1, x,     y - 2, du, 'u', 'U'},
-			{ x + 1, y,     x + 2, y,     dr, 'r', 'R'},
-			{ x,     y + 1, x,     y + 2, dd, 'd', 'D'},
+			{x - 1,  y,     x - 2, y,     'l', 'L'},
+			{ x,     y - 1, x,     y - 2, 'u', 'U'},
+			{ x + 1, y,     x + 2, y,     'r', 'R'},
+			{ x,     y + 1, x,     y + 2, 'd', 'D'},
 		};
 
 		for (u32 i = 0; i < 4; ++i) {
@@ -478,7 +431,6 @@ bool game_solve_cbfs(Game *game, State *ret)
 			u32 py = dirs[i].py;
 			u32 bx = dirs[i].bx;
 			u32 by = dirs[i].by;
-			u32 d = dirs[i].dist;
 
 			bool do_something;
 			State next;
@@ -510,7 +462,7 @@ bool game_solve_cbfs(Game *game, State *ret)
 					return TRUE;
 				}
 
-				next.total_distance = d + heuristic(game, &next);
+				next.total_distance = vertex.distance + 1 + heuristic(game, &next);
 
 				if (!trb_heap_search_data(&vertices, &next, (TrbCmpDataFunc) state_cmp, &game->ngoals, NULL)) {
 					trb_heap_insert(&vertices, &next);
