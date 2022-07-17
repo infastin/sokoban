@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/timerfd.h>
+#include <time.h>
 #include <tribble/tribble.h>
 #include <unistd.h>
 
@@ -330,6 +331,33 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	Game game;
+	game_init(&game);
+	game_parse_board(&game, w, h, (const char *) board);
+
+	if (solver != game_solve_dfs) {
+		game_calc_distances(&game, distance_metric);
+		game_do_assignment(&game, assignment_alg);
+	}
+
+	clock_t old = clock();
+
+	State sol;
+	bool solved = solver(&game, &sol);
+
+	clock_t new = clock();
+
+	double diff = (double) (new - old) / (double) CLOCKS_PER_SEC;
+
+	if (solved) {
+		printf("Length: %lu\n", sol.solution.len);
+		printf("Processor time: %lf\n", diff);
+	} else {
+		printf("No solution found!\n");
+	}
+
+	return 0;
+
 	initscr();
 	noecho();
 	cbreak();
@@ -351,9 +379,9 @@ int main(int argc, char *argv[])
 	init_pair(6, COLOR_BLACK, COLOR_CYAN);
 	init_pair(7, COLOR_BLACK, COLOR_GREEN);
 
-	Game game;
-	game_init(&game);
-	game_parse_board(&game, w, h, (const char *) board);
+	/* Game game; */
+	/* game_init(&game); */
+	/* game_parse_board(&game, w, h, (const char *) board); */
 
 	show_board(&game, &game.state);
 	printw("Calculating...");
@@ -364,8 +392,8 @@ int main(int argc, char *argv[])
 		game_do_assignment(&game, assignment_alg);
 	}
 
-	State sol;
-	bool solved = solver(&game, &sol);
+	/* State sol; */
+	/* bool solved = solver(&game, &sol); */
 
 	clear();
 
